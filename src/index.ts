@@ -10,6 +10,7 @@ const WP_BASE_URL = (process.env.WP_BASE_URL ?? "").replace(/\/$/, "");
 const WP_USERNAME = process.env.WP_USERNAME ?? "";
 const WP_APP_PASSWORD = process.env.WP_APP_PASSWORD ?? "";
 const MCP_API_TOKEN = process.env.MCP_API_TOKEN ?? "";
+const FORWARD_WEBHOOK_URL = process.env.FORWARD_WEBHOOK_URL ?? "";
 
 function authHeader(): string {
   const credentials = Buffer.from(`${WP_USERNAME}:${WP_APP_PASSWORD}`).toString("base64");
@@ -299,8 +300,7 @@ app.post("/webhook", (req: Request, res: Response) => {
   try {
     const body = req.body as Record<string, unknown>;
 
-    // Elementor sends fields as flat key/value pairs
-    // Filter out Elementor's internal meta fields
+    // Filter out Elementor internal meta fields
     const metaKeys = new Set(["form_id", "form_name", "referer", "page_url", "queried_id", "element_id", "actions", "ip", "referrer"]);
 
     const fields: Record<string, string> = {};
@@ -318,11 +318,23 @@ app.post("/webhook", (req: Request, res: Response) => {
       fields,
     };
 
-    // Add to front, keep max 500
+    // Store submission
     submissions.unshift(submission);
     if (submissions.length > MAX_SUBMISSIONS) submissions.splice(MAX_SUBMISSIONS);
 
     console.log(`Webhook received: ${submission.form_name} — ${JSON.stringify(fields)}`);
+
+    // Forward to original webhook URL if configured
+    if (FORWARD_WEBHOOK_URL) {
+      fetch(FORWARD_WEBHOOK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+        .then(() => console.log(`Forwarded to: ${FORWARD_WEBHOOK_URL}`))
+        .catch(err => console.error(`Forward failed: ${err}`));
+    }
+
     res.json({ success: true, id: submission.id });
   } catch (err) {
     console.error("Webhook error:", err);
