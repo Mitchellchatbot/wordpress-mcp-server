@@ -286,6 +286,7 @@ function buildServer(): McpServer {
 const app = express();
 app.use(cors({ origin: "*" }));
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 function isAuthorized(req: Request): boolean {
   const secret = process.env.MCP_AUTH_TOKEN;
