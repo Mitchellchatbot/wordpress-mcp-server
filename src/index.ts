@@ -44,20 +44,24 @@ async function wpRequest(
   return text ? JSON.parse(text) : null;
 }
 
-
 // ─── Elementor field ID → human label map ────────────────────────────────────
 const FIELD_LABELS: Record<string, string> = {
-  "email":          "First Name",
-  "field_357e341":  "Last Name",
-  "field_e99ca9e":  "Email",
-  "field_07f0796":  "Insurance Provider",
-  "field_e806566":  "Member ID/Policy Number",
-  "field_6a07350":  "Date of Birth",
+  "email":         "First Name",
+  "field_357e341": "Last Name",
+  "field_e99ca9e": "Email",
+  "field_07f0796": "Insurance Provider",
+  "field_e806566": "Member ID/Policy Number",
+  "field_6a07350": "Date of Birth",
 };
 
 function resolveFieldLabel(key: string): string {
   return FIELD_LABELS[key] ?? key;
 }
+
+// ─── Elementor form ID → human name map ──────────────────────────────────────
+const FORM_NAMES: Record<string, string> = {
+  "f82804c": "Contact Form",
+};
 
 // ─── Webhook submission store (in-memory) ────────────────────────────────────
 
@@ -70,7 +74,7 @@ interface Submission {
 }
 
 const submissions: Submission[] = [];
-const MAX_SUBMISSIONS = 500; // keep last 500 submissions in memory
+const MAX_SUBMISSIONS = 500;
 
 // ─── MCP server factory ──────────────────────────────────────────────────────
 
@@ -320,41 +324,49 @@ app.post("/webhook", (req: Request, res: Response) => {
 
     const fields: Record<string, string> = {};
 
-    // Format 1: fields is an object where each value is {value, label, ...}
-    // e.g. body.fields = { name: { value: "John", label: "Name" }, email: { value: "..." } }
-    if (body.fields && !Array.isArray(body.fields) && typeof body.fields === "object") {
+    // Format 1: Elementor standard — body.form_fields is a flat object with field IDs as keys
+    // e.g. { form_fields: { email: "John", field_357e341: "Doe" }, form_id: "f82804c", ... }
+    if (body.form_fields && typeof body.form_fields === "object" && !Array.isArray(body.form_fields)) {
+      for (const [key, val] of Object.entries(body.form_fields as Record<string, unknown>)) {
+        fields[resolveFieldLabel(key)] = String(val ?? "");
+      }
+    }
+    // Format 2: fields is an object where each value is {value, label, ...}
+    else if (body.fields && !Array.isArray(body.fields) && typeof body.fields === "object") {
       for (const [key, val] of Object.entries(body.fields as Record<string, unknown>)) {
         if (val && typeof val === "object") {
           const obj = val as Record<string, unknown>;
-          fields[String(obj.label ?? key)] = String(obj.value ?? "");
+          fields[String(obj.label ?? resolveFieldLabel(key))] = String(obj.value ?? "");
         } else {
-          fields[key] = String(val ?? "");
+          fields[resolveFieldLabel(key)] = String(val ?? "");
         }
       }
     }
-    // Format 2: fields is an array [{id, title, value}]
+    // Format 3: fields is an array [{id, title, value}]
     else if (Array.isArray(body.fields)) {
       for (const f of body.fields as Array<Record<string, unknown>>) {
         const rawKey = String(f.id ?? "");
-        const key = resolveFieldLabel(rawKey) !== rawKey ? resolveFieldLabel(rawKey) : String(f.title ?? f.label ?? f.id ?? "field");
-        fields[key] = String(f.value ?? "");
+        const label = resolveFieldLabel(rawKey) !== rawKey
+          ? resolveFieldLabel(rawKey)
+          : String(f.title ?? f.label ?? f.id ?? "field");
+        fields[label] = String(f.value ?? "");
       }
     }
-    // Format 3: flat body key/value pairs
+    // Format 4: flat body key/value pairs (fallback)
     else {
-      const metaKeys = new Set(["form_id", "form_name", "referer", "page_url", "queried_id", "element_id", "actions", "ip", "referrer", "remote_ip", "submitted_on"]);
+      const metaKeys = new Set([
+        "form_id", "form_name", "referer", "page_url", "queried_id",
+        "element_id", "actions", "ip", "referrer", "remote_ip",
+        "submitted_on", "form_fields", "post_id", "referer_title",
+      ]);
       for (const [key, val] of Object.entries(body)) {
-        if (!metaKeys.has(key) && key !== "fields") {
-          const label = resolveFieldLabel(key);
-          fields[label] = typeof val === "object" ? JSON.stringify(val) : String(val ?? "");
+        if (!metaKeys.has(key)) {
+          fields[resolveFieldLabel(key)] = typeof val === "object" ? JSON.stringify(val) : String(val ?? "");
         }
       }
     }
 
-    // Form name — map known form IDs to readable names
-    const FORM_NAMES: Record<string, string> = {
-      "f82804c": "Contact Form",
-    };
+    // Form name — prefer FORM_NAMES map, then form_name field, then form_id
     const rawFormId = String(body.form_id ?? "");
     const formName =
       FORM_NAMES[rawFormId] ||
@@ -373,7 +385,6 @@ app.post("/webhook", (req: Request, res: Response) => {
       fields,
     };
 
-    // Store submission
     submissions.unshift(submission);
     if (submissions.length > MAX_SUBMISSIONS) submissions.splice(MAX_SUBMISSIONS);
 
