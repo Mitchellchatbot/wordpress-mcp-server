@@ -300,21 +300,41 @@ app.post("/webhook", (req: Request, res: Response) => {
   try {
     const body = req.body as Record<string, unknown>;
 
-    // Filter out Elementor internal meta fields
-    const metaKeys = new Set(["form_id", "form_name", "referer", "page_url", "queried_id", "element_id", "actions", "ip", "referrer"]);
+    // Log raw payload so we can inspect what Elementor actually sends
+    console.log("Webhook raw payload:", JSON.stringify(body, null, 2));
+
+    const metaKeys = new Set(["form_id", "form_name", "referer", "page_url", "queried_id", "element_id", "actions", "ip", "referrer", "remote_ip", "submitted_on"]);
 
     const fields: Record<string, string> = {};
-    for (const [key, val] of Object.entries(body)) {
-      if (!metaKeys.has(key)) {
-        fields[key] = String(val ?? "");
+
+    // Format 1: Elementor sends a nested "fields" array [{id, title, value}]
+    if (Array.isArray(body.fields)) {
+      for (const f of body.fields as Array<{ id?: string; title?: string; value?: string }>) {
+        const key = f.title ?? f.id ?? "field";
+        fields[key] = String(f.value ?? "");
       }
     }
+    // Format 2: Elementor sends fields as flat key/value on the body
+    else {
+      for (const [key, val] of Object.entries(body)) {
+        if (!metaKeys.has(key) && key !== "fields") {
+          fields[key] = String(val ?? "");
+        }
+      }
+    }
+
+    // Form name — try multiple possible keys Elementor uses
+    const formName =
+      String(body.form_name ?? body["form-name"] ?? body.form_id ?? "").trim() || "Unknown Form";
+
+    // Page URL
+    const pageUrl = String(body.referer ?? body.page_url ?? body.referrer ?? "");
 
     const submission: Submission = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       received_at: new Date().toISOString(),
-      form_name: String(body.form_name ?? body.form_id ?? "Unknown Form"),
-      page_url: String(body.referer ?? body.page_url ?? ""),
+      form_name: formName,
+      page_url: pageUrl,
       fields,
     };
 
