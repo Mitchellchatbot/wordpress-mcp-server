@@ -300,30 +300,41 @@ app.post("/webhook", (req: Request, res: Response) => {
   try {
     const body = req.body as Record<string, unknown>;
 
-    // Log raw payload so we can inspect what Elementor actually sends
+    // Log raw payload
     console.log("Webhook raw payload:", JSON.stringify(body, null, 2));
-
-    const metaKeys = new Set(["form_id", "form_name", "referer", "page_url", "queried_id", "element_id", "actions", "ip", "referrer", "remote_ip", "submitted_on"]);
 
     const fields: Record<string, string> = {};
 
-    // Format 1: Elementor sends a nested "fields" array [{id, title, value}]
-    if (Array.isArray(body.fields)) {
-      for (const f of body.fields as Array<{ id?: string; title?: string; value?: string }>) {
-        const key = f.title ?? f.id ?? "field";
-        fields[key] = String(f.value ?? "");
-      }
-    }
-    // Format 2: Elementor sends fields as flat key/value on the body
-    else {
-      for (const [key, val] of Object.entries(body)) {
-        if (!metaKeys.has(key) && key !== "fields") {
+    // Format 1: fields is an object where each value is {value, label, ...}
+    // e.g. body.fields = { name: { value: "John", label: "Name" }, email: { value: "..." } }
+    if (body.fields && !Array.isArray(body.fields) && typeof body.fields === "object") {
+      for (const [key, val] of Object.entries(body.fields as Record<string, unknown>)) {
+        if (val && typeof val === "object") {
+          const obj = val as Record<string, unknown>;
+          fields[String(obj.label ?? key)] = String(obj.value ?? "");
+        } else {
           fields[key] = String(val ?? "");
         }
       }
     }
+    // Format 2: fields is an array [{id, title, value}]
+    else if (Array.isArray(body.fields)) {
+      for (const f of body.fields as Array<Record<string, unknown>>) {
+        const key = String(f.title ?? f.label ?? f.id ?? "field");
+        fields[key] = String(f.value ?? "");
+      }
+    }
+    // Format 3: flat body key/value pairs
+    else {
+      const metaKeys = new Set(["form_id", "form_name", "referer", "page_url", "queried_id", "element_id", "actions", "ip", "referrer", "remote_ip", "submitted_on"]);
+      for (const [key, val] of Object.entries(body)) {
+        if (!metaKeys.has(key) && key !== "fields") {
+          fields[key] = typeof val === "object" ? JSON.stringify(val) : String(val ?? "");
+        }
+      }
+    }
 
-    // Form name — try multiple possible keys Elementor uses
+    // Form name
     const formName =
       String(body.form_name ?? body["form-name"] ?? body.form_id ?? "").trim() || "Unknown Form";
 
