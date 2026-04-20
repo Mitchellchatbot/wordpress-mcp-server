@@ -3,6 +3,7 @@ import cors from "cors";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
+import dns from "dns";
 import pkg from "pg";
 const { Pool } = pkg;
 
@@ -17,6 +18,9 @@ const { Pool } = pkg;
 //   PORT             (set automatically by Railway)
 //
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Force IPv4 — Railway does not support IPv6 to Supabase
+dns.setDefaultResultOrder("ipv4first");
 
 // ─── Supabase / Postgres ──────────────────────────────────────────────────────
 
