@@ -1,0 +1,27 @@
+{
+  "name": "wordpress-mcp-server",
+  "version": "1.0.0",
+  "description": "Generic WordPress MCP server — form submissions, content & copy editing",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.11.0",
+    "@types/cors": "^2.8.19",
+    "cors": "^2.8.6",
+    "express": "^4.21.2",
+    "pg": "^8.11.3",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.1",
+    "@types/node": "^22.15.2",
+    "@types/pg": "^8.11.6",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3"
+  }
+}
