@@ -333,14 +333,47 @@ app.post("/webhook", async (req: Request, res: Response) => {
 
     const fields: Record<string, string> = {};
 
+    // Format 0: Zapier — sends everything as a stringified JSON blob under body.fields
+    // e.g. { fields: '{"fields[email][value]":"John","form[name]":"Contact Form",...}' }
+    if (typeof body.fields === "string") {
+      try {
+        const parsed = JSON.parse(body.fields) as Record<string, string>;
+
+        // Extract form name from form[name]
+        const zapFormName = parsed["form[name]"] ?? "";
+        const zapFormId = parsed["form[id]"] ?? "";
+        if (zapFormName) (body as Record<string, unknown>)["_zap_form_name"] = zapFormName;
+        if (zapFormId)   (body as Record<string, unknown>)["_zap_form_id"]   = zapFormId;
+
+        // Extract page URL from meta[page_url][value]
+        const zapPageUrl = parsed["meta[page_url][value]"] ?? "";
+        if (zapPageUrl) (body as Record<string, unknown>)["_zap_page_url"] = zapPageUrl;
+
+        // Extract fields — keys like fields[email][value], use fields[email][title] as label
+        const fieldValues: Record<string, string> = {};
+        const fieldTitles: Record<string, string> = {};
+        for (const [key, val] of Object.entries(parsed)) {
+          const valueMatch = key.match(/^fields\[([^\]]+)\]\[value\]$/);
+          const titleMatch = key.match(/^fields\[([^\]]+)\]\[title\]$/);
+          if (valueMatch) fieldValues[valueMatch[1]] = val;
+          if (titleMatch) fieldTitles[titleMatch[1]] = val;
+        }
+        for (const [id, value] of Object.entries(fieldValues)) {
+          const label = fieldTitles[id] ?? resolveFieldLabel(id);
+          fields[label] = value;
+        }
+      } catch {
+        // not valid JSON, fall through to other formats
+      }
+    }
     // Format 1: Elementor standard — form_fields flat object
-    if (body.form_fields && typeof body.form_fields === "object" && !Array.isArray(body.form_fields)) {
+    else if (body.form_fields && typeof body.form_fields === "object" && !Array.isArray(body.form_fields)) {
       for (const [key, val] of Object.entries(body.form_fields as Record<string, unknown>)) {
         fields[resolveFieldLabel(key)] = String(val ?? "");
       }
     }
     // Format 2: fields object with {value, label} per field
-    else if (body.fields && !Array.isArray(body.fields) && typeof body.fields === "object") {
+    else if (typeof body.fields !== "string" && body.fields && !Array.isArray(body.fields) && typeof body.fields === "object") {
       for (const [key, val] of Object.entries(body.fields as Record<string, unknown>)) {
         if (val && typeof val === "object") {
           const obj = val as Record<string, unknown>;
@@ -366,20 +399,22 @@ app.post("/webhook", async (req: Request, res: Response) => {
       }
     }
 
-    // Extract form name — Elementor sends as body.form.name
+    // Extract form name — supports Zapier (_zap_form_name), Elementor (body.form.name), and flat (body.form_name)
     const formObj = body.form as Record<string, unknown> | undefined;
-    const rawFormId = String(formObj?.id ?? body.form_id ?? "");
+    const rawFormId = String(body["_zap_form_id"] ?? formObj?.id ?? body.form_id ?? "");
     const formName =
+      String(body["_zap_form_name"] ?? "").trim() ||
       String(formObj?.name ?? "").trim() ||
       FORM_NAMES[rawFormId] ||
       String(body.form_name ?? body["form-name"] ?? "").trim() ||
       rawFormId ||
       "Unknown Form";
 
-    // Extract page URL — Elementor sends as body.meta.page_url.value
+    // Extract page URL — supports Zapier (_zap_page_url), Elementor (body.meta.page_url.value), and flat
     const metaObj = body.meta as Record<string, unknown> | undefined;
     const pageUrlObj = metaObj?.page_url as Record<string, unknown> | undefined;
     const pageUrl =
+      String(body["_zap_page_url"] ?? "").trim() ||
       String(pageUrlObj?.value ?? "").trim() ||
       String(body.referer ?? body.page_url ?? body.referrer ?? "");
 
